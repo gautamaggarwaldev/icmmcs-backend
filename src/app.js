@@ -12,6 +12,7 @@ import { connectDB } from './config/db.js';
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import contactRoutes from './routes/contact.js';
+import reviewerExpressionRoutes from "./routes/reviewerExpressionRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,6 +58,7 @@ app.use('/api/reviewing-committee', reviewingCommitteeRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/contact', contactRoutes);
+app.use("/api/reviewer-expression", reviewerExpressionRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

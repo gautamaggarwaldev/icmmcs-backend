@@ -254,3 +254,33 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+
+enum ReviewerStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model ReviewerExpression {
+  id                         String          @id @default(uuid())
+  name                       String
+  currentJobTitle            String
+  institution                String
+  email                      String?         
+
+  // Arrays stored as JSON
+  education                  Json            // ["PhD in CS", "MSc AI"]
+  subjectArea                Json            // ["ML", "NLP"]
+  methodologicalExpertise    Json            // ["Quantitative", "Mixed Methods"]
+  researchInterest           Json            // ["Deep Learning", "Optimization"]
+
+  previousPeerReviewExperience String?       @db.Text
+  conflictOfInterest           String?       @db.Text
+
+  cvUrl                      String?
+  status                     ReviewerStatus  @default(PENDING)
+
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+}

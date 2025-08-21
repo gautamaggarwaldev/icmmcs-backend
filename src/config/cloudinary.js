@@ -247,4 +247,46 @@ export const keynoteUpload = multer({
   }
 });
 
+const reviewerExpressionStorage = new CloudinaryStorage({
+  cloudinary,
+  params: (req, file) => {
+    const original = file.originalname || "file";
+    const nameNoExt = original.includes(".") ? original.substring(0, original.lastIndexOf(".")) : original;
+    const ext = original.includes(".") ? original.substring(original.lastIndexOf(".") + 1) : undefined;
+    return {
+      folder: "cv_reviewer_expression",    // <-- requested folder
+      resource_type: "raw",                // pdf/docx are non-images
+      public_id: `cv_${Date.now()}_${nameNoExt}`,   // do NOT include extension here
+      format: ext                          // let Cloudinary add extension
+    };
+  }
+});
+
+export const reviewerExpressionUpload = multer({
+  storage: reviewerExpressionStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    console.log("Reviewer Expression file upload attempt:", {
+      fieldname: file.fieldname,
+      filename: file.originalname,
+      mimetype: file.mimetype
+    });
+    const original = (file.originalname || "").toLowerCase();
+    const ext = original.slice(original.lastIndexOf("."));
+    const allowedTypes = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ];
+    const allowedExts = [".pdf", ".docx"];
+
+    if (file.fieldname !== "cvFile") {
+      return cb(new Error("Unknown file field for reviewer expression (expected 'cvFile')"), false);
+    }
+    if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
+      return cb(null, true);
+    }
+    return cb(new Error("CV must be PDF or DOCX format!"), false);
+  }
+});
+
 export default cloudinary; 
