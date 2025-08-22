@@ -31,9 +31,9 @@ router.post(
 
 // Super Admin management
 router.get("/all", verifyToken, requireSuperAdmin, getAllFormFilled);
-// router.get("/", verifyToken, requireSuperAdmin, listReviewerExpressions);
 router.get("/:id", verifyToken, requireSuperAdmin, getReviewerExpressionById);
 router.patch("/:id/status", verifyToken, requireSuperAdmin, updateReviewerExpressionStatus);
 router.delete("/:id", verifyToken, requireSuperAdmin, deleteReviewerExpression);
 
+// router.get("/", verifyToken, requireSuperAdmin, listReviewerExpressions);
 export default router;
