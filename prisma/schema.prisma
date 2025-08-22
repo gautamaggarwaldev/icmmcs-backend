@@ -263,24 +263,25 @@ enum ReviewerStatus {
 }
 
 model ReviewerExpression {
-  id                         String          @id @default(uuid())
-  name                       String
-  currentJobTitle            String
-  institution                String
-  email                      String?         
+  id                           String          @id @default(uuid())
+  name                         String
+  currentJobTitle              String
+  institution                  String
+  email                        String
+  phone                        String
 
   // Arrays stored as JSON
-  education                  Json            // ["PhD in CS", "MSc AI"]
-  subjectArea                Json            // ["ML", "NLP"]
-  methodologicalExpertise    Json            // ["Quantitative", "Mixed Methods"]
-  researchInterest           Json            // ["Deep Learning", "Optimization"]
+  education                    Json
+  subjectArea                  Json
+  methodologicalExpertise      Json
+  researchInterest             Json
 
   previousPeerReviewExperience String?       @db.Text
   conflictOfInterest           String?       @db.Text
 
-  cvUrl                      String?
-  status                     ReviewerStatus  @default(PENDING)
+  cvUrl                        String?
+  status                       ReviewerStatus  @default(PENDING)
 
-  createdAt                  DateTime        @default(now())
-  updatedAt                  DateTime        @updatedAt
+  createdAt                    DateTime        @default(now())
+  updatedAt                    DateTime        @updatedAt
 }

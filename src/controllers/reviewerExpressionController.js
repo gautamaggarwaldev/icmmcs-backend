@@ -97,6 +97,7 @@ export const createReviewerExpression = async (req, res) => {
     const {
       name,
       email,
+      phone,
       currentJobTitle,
       institution,
       education,
@@ -117,6 +118,7 @@ export const createReviewerExpression = async (req, res) => {
     const payload = {
       name,
       email,
+      phone,
       currentJobTitle,
       institution,
       education: parseSmartArray(education),
