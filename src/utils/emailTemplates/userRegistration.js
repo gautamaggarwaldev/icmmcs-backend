@@ -163,6 +163,7 @@ export const speakerConfirmationTemplate = (speakerData) => `
       
       <div class="highlight">
         <h3>📋 Your Submission Details</h3>
+        <p><strong>Paper ID:</strong> ${speakerData.paperId}</p>
         <p><strong>Paper Title:</strong> ${speakerData.paperTitle}</p>
         <p><strong>Institution:</strong> ${speakerData.institutionName}</p>
         <p><strong>Conference Track:</strong> ${speakerData.conferenceTitle}</p>

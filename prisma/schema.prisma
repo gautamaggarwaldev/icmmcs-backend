@@ -44,6 +44,8 @@ model sponsor {
 
 model speaker {
   id              String       @id @default(uuid())
+  // paperId   String? @unique   // <— new
+  paperId   String  @unique 
   
   // Conference Information
   conferenceTitle String
@@ -74,6 +76,7 @@ model speaker {
   paperFileUrl    String?
   supplementaryFileUrl String?
   sourceCodeFileUrl String?
+  turnitinReportUrl  String?      // Cloudinary URL for Turnitin report
   
   // Additional Declarations
   ethicsCompliance Boolean     @default(false)
@@ -114,6 +117,10 @@ model speaker {
   
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
+
+  // Automated reminder tracking
+ reviewReminderCount       Int       @default(0)
+ reviewReminderLastSentAt  DateTime?
 }
 
 enum AttendeeType {

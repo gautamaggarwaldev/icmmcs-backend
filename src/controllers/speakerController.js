@@ -1,7 +1,6 @@
 import { prisma } from "../config/db.js";
 import { sendSpeakerRegistrationEmail } from "../services/emailService.js";
 
-// Validation functions
 const validateEmail = (email) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
@@ -18,16 +17,57 @@ const validateOrcid = (orcid) => {
   return orcidRegex.test(orcid);
 };
 
+// -------------------------------------------
+// PAPER ID HELPERS (GLOBAL, NEVER RESETS)
+// Format: YYMM + global serial (3 digits)
+// e.g. 2509011 for 2025 Sep, global #11
+// -------------------------------------------
+const SERIAL_PAD = 3;
+
+function formatPaperId(date, seq, pad = SERIAL_PAD) {
+  const yy = String(date.getFullYear()).slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const s  = String(seq).padStart(pad, "0");
+  return `${yy}${mm}${s}`;
+}
+
+/**
+ * Get the next global serial number by looking at the current
+ * maximum serial used in paperId (SUBSTRING from 5th char onward).
+ * If query fails (or no rows), fallback to count-based.
+ */
+async function getNextGlobalSerial() {
+  try {
+    // Works on MySQL: paperId like 'YYMMSSS' → serial is SUBSTRING from 5
+    const rows = await prisma.$queryRawUnsafe(`
+      SELECT MAX(CAST(SUBSTRING(paperId, 5) AS UNSIGNED)) AS maxSerial
+      FROM speaker
+      WHERE paperId IS NOT NULL
+    `);
+    const maxSerial = Number(rows?.[0]?.maxSerial) || 0;
+    return maxSerial + 1;
+  } catch (err) {
+    // Fallback if raw query not available
+    const c = await prisma.speaker.count({ where: { paperId: { not: null } } });
+    return c + 1;
+  }
+}
+
+// --------------------------
+// CONTROLLERS
+// --------------------------
 export const registerSpeaker = async (req, res) => {
   try {
     const speakerData = req.body;
     const { referralCode } = speakerData;
-    
-    // Handle file uploads
+
+    // --------------------------
+    // Handle file uploads (yours)
+    // --------------------------
     let paperFileUrl = null;
     let supplementaryFileUrl = null;
     let sourceCodeFileUrl = null;
-    
+
     if (req.files) {
       if (req.files.paperFile) {
         paperFileUrl = req.files.paperFile[0].path;
@@ -40,7 +80,9 @@ export const registerSpeaker = async (req, res) => {
       }
     }
 
-    // If referral code is provided, verify it exists
+    // ---------------------------------
+    // Referral code → find Admin (yours)
+    // ---------------------------------
     let referredById = null;
     if (referralCode) {
       const admin = await prisma.Admin.findUnique({
@@ -48,53 +90,49 @@ export const registerSpeaker = async (req, res) => {
       });
 
       if (!admin) {
-        return res.status(400).json({ 
-          message: 'Invalid referral code',
-          success: false 
+        return res.status(400).json({
+          message: "Invalid referral code",
+          success: false
         });
       }
       referredById = admin.id;
     }
 
-    // Validate required fields
+    // ----------------------------
+    // Required fields (your logic)
+    // ----------------------------
     const requiredFields = [
-      'conferenceTitle', 'placeDate', 'paperTitle', 'paperAbstract', 'keywords',
-      'name', 'email', 'phone', 'institutionName', 'country', 'primarySubject',
-      'ethicsCompliance', 'agreeTerms', 'agreePresentation', 'agreePublication',
-      'agreeReview', 'agreeDataSharing'
+      "conferenceTitle", "placeDate", "paperTitle", "paperAbstract", "keywords",
+      "name", "email", "phone", "institutionName", "country", "primarySubject",
+      "ethicsCompliance", "agreeTerms", "agreePresentation", "agreePublication",
+      "agreeReview", "agreeDataSharing"
     ];
-    
-    const missingFields = requiredFields.filter(field => {
-      if (field === 'ethicsCompliance' || field.startsWith('agree')) {
-        return !speakerData[field] || speakerData[field] !== 'true';
+
+    const missingFields = requiredFields.filter((field) => {
+      if (field === "ethicsCompliance" || field.startsWith("agree")) {
+        return !speakerData[field] || speakerData[field] !== "true";
       }
       return !speakerData[field];
     });
-    
+
     if (missingFields.length > 0) {
       return res.status(400).json({
-        message: `Missing required fields: ${missingFields.join(', ')}`,
+        message: `Missing required fields: ${missingFields.join(", ")}`,
         success: false
       });
     }
 
-    // Validate email format
+    // ---------------------------
+    // Field validations (yours)
+    // ---------------------------
     if (!validateEmail(speakerData.email)) {
-      return res.status(400).json({
-        message: "Invalid email format",
-        success: false
-      });
+      return res.status(400).json({ message: "Invalid email format", success: false });
     }
 
-    // Validate phone format
     if (!validatePhone(speakerData.phone)) {
-      return res.status(400).json({
-        message: "Invalid phone number format",
-        success: false
-      });
+      return res.status(400).json({ message: "Invalid phone number format", success: false });
     }
 
-    // Validate ORCID if provided
     if (speakerData.orcidId && !validateOrcid(speakerData.orcidId)) {
       return res.status(400).json({
         message: "Invalid ORCID format (should be 0000-0000-0000-0000)",
@@ -102,8 +140,8 @@ export const registerSpeaker = async (req, res) => {
       });
     }
 
-    // Validate abstract length
-    const abstractWords = speakerData.paperAbstract.trim().split(/\s+/).filter(word => word.length > 0);
+    // Abstract length (50–500 words)
+    const abstractWords = speakerData.paperAbstract.trim().split(/\s+/).filter(w => w.length > 0);
     if (abstractWords.length < 50) {
       return res.status(400).json({
         message: "Abstract must be at least 50 words long",
@@ -117,22 +155,24 @@ export const registerSpeaker = async (req, res) => {
       });
     }
 
-    // Validate conditional fields
-    if (speakerData.preprintPolicy === 'true' && !speakerData.preprintUrl) {
+    // Conditional fields
+    if (speakerData.preprintPolicy === "true" && !speakerData.preprintUrl) {
       return res.status(400).json({
         message: "Preprint URL is required when preprint policy is selected",
         success: false
       });
     }
 
-    if (speakerData.aiGeneratedContent === 'true' && !speakerData.aiContentDescription) {
+    if (speakerData.aiGeneratedContent === "true" && !speakerData.aiContentDescription) {
       return res.status(400).json({
         message: "AI content description is required when AI-generated content is selected",
         success: false
       });
     }
 
-    // Validate co-authors if any
+    // -----------------------------
+    // Co-authors JSON validation
+    // -----------------------------
     let coAuthors = [];
     if (speakerData.coAuthors) {
       try {
@@ -166,11 +206,12 @@ export const registerSpeaker = async (req, res) => {
       }
     }
 
-    // Check if email already exists
+    // -------------------------------------
+    // Unique email (your existing check)
+    // -------------------------------------
     const existingSpeaker = await prisma.speaker.findUnique({
       where: { email: speakerData.email }
     });
-
     if (existingSpeaker) {
       return res.status(400).json({
         message: "Speaker already registered with this email",
@@ -178,17 +219,19 @@ export const registerSpeaker = async (req, res) => {
       });
     }
 
-    // Prepare data for database insertion
+    // -------------------------------------
+    // Prepare DB payload (yours)
+    // -------------------------------------
     const speakerCreateData = {
       // Conference Information
       conferenceTitle: speakerData.conferenceTitle,
       placeDate: speakerData.placeDate,
-      
+
       // Paper Information
       paperTitle: speakerData.paperTitle,
       paperAbstract: speakerData.paperAbstract,
       keywords: speakerData.keywords,
-      
+
       // Primary Author Information
       name: speakerData.name,
       email: speakerData.email,
@@ -196,58 +239,91 @@ export const registerSpeaker = async (req, res) => {
       institutionName: speakerData.institutionName,
       country: speakerData.country,
       orcidId: speakerData.orcidId || null,
-      isCorrespondingAuthor: speakerData.correspondingAuthor === 'true',
-      
-      // Co-authors Information
+      isCorrespondingAuthor: speakerData.correspondingAuthor === "true",
+
+      // Co-authors
       coAuthors: coAuthors.length > 0 ? JSON.stringify(coAuthors) : null,
-      
+
       // Subject Areas
       primarySubject: speakerData.primarySubject,
       additionalSubjects: speakerData.additionalSubjects || null,
-      
+
       // File Uploads
-      paperFileUrl: paperFileUrl,
-      supplementaryFileUrl: supplementaryFileUrl,
-      sourceCodeFileUrl: sourceCodeFileUrl,
-      
-      // Additional Declarations
-      ethicsCompliance: speakerData.ethicsCompliance === 'true',
-      dataAvailability: speakerData.dataAvailability === 'true',
-      preprintPolicy: speakerData.preprintPolicy === 'true',
+      paperFileUrl,
+      supplementaryFileUrl,
+      sourceCodeFileUrl,
+
+      // Declarations
+      ethicsCompliance: speakerData.ethicsCompliance === "true",
+      dataAvailability: speakerData.dataAvailability === "true",
+      preprintPolicy: speakerData.preprintPolicy === "true",
       preprintUrl: speakerData.preprintUrl || null,
-      conflictOfInterest: speakerData.conflictOfInterest === 'true',
-      
+      conflictOfInterest: speakerData.conflictOfInterest === "true",
+
       // Supplementary Questions
-      previouslySubmitted: speakerData.previouslySubmitted === 'true',
+      previouslySubmitted: speakerData.previouslySubmitted === "true",
       previousSubmissionInfo: speakerData.previousSubmissionInfo || null,
-      willingToReview: speakerData.willingToReview === 'true',
-      aiGeneratedContent: speakerData.aiGeneratedContent === 'true',
+      willingToReview: speakerData.willingToReview === "true",
+      aiGeneratedContent: speakerData.aiGeneratedContent === "true",
       aiContentDescription: speakerData.aiContentDescription || null,
-      studentPaper: speakerData.studentPaper === 'true',
-      
+      studentPaper: speakerData.studentPaper === "true",
+
       // Agreements
-      agreeTerms: speakerData.agreeTerms === 'true',
-      agreePresentation: speakerData.agreePresentation === 'true',
-      agreePublication: speakerData.agreePublication === 'true',
-      agreeReview: speakerData.agreeReview === 'true',
-      agreeDataSharing: speakerData.agreeDataSharing === 'true',
-      
-      // Additional Information
+      agreeTerms: speakerData.agreeTerms === "true",
+      agreePresentation: speakerData.agreePresentation === "true",
+      agreePublication: speakerData.agreePublication === "true",
+      agreeReview: speakerData.agreeReview === "true",
+      agreeDataSharing: speakerData.agreeDataSharing === "true",
+
+      // Additional
       message: speakerData.message || null,
       referralCode: referralCode || null,
       referredById: referredById,
-      
-      // Legacy fields for backward compatibility
-      attendeeType: 'presenter',
+
+      // Legacy
+      attendeeType: "presenter",
       fileUrl: paperFileUrl
     };
 
-    // Create new speaker
-    const newSpeaker = await prisma.speaker.create({
-      data: speakerCreateData,
-    });
+    // --------------------------------------------------------
+    // CREATE WITH GLOBAL PAPER ID (unique + concurrency safe)
+    // --------------------------------------------------------
+    const now = new Date();
+    let serial = await getNextGlobalSerial();
+    let newSpeaker = null;
 
-    // If referral code exists, create the user record with admin reference
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const candidatePaperId = formatPaperId(now, serial);
+
+      try {
+        newSpeaker = await prisma.speaker.create({
+          data: {
+            ...speakerCreateData,
+            paperId: candidatePaperId, // <-- NEW FIELD HERE
+          },
+        });
+        break; // success
+      } catch (e) {
+        // On unique violation for paperId, bump serial and retry
+        if (e.code === "P2002" && String(e?.meta?.target || "").includes("paperId")) {
+          serial += 1;
+          continue;
+        }
+        // Other errors: rethrow
+        throw e;
+      }
+    }
+
+    if (!newSpeaker) {
+      return res.status(500).json({
+        message: "Could not allocate a unique Paper ID. Please retry.",
+        success: false,
+      });
+    }
+
+    // ------------------------------------------
+    // Create user record if referralCode present
+    // ------------------------------------------
     if (referralCode && referredById) {
       await prisma.user.create({
         data: {
@@ -259,39 +335,43 @@ export const registerSpeaker = async (req, res) => {
       });
     }
 
-    // Send registration confirmation emails
+    // ---------------------------
+    // Send confirmation emails
+    // (templates can now show ${paperId})
+    // ---------------------------
     await sendSpeakerRegistrationEmail(newSpeaker);
 
+    // ---------------------------
+    // Final response
+    // ---------------------------
     res.status(201).json({
       message: "Paper submission successful",
       user: newSpeaker,
       success: true,
     });
   } catch (error) {
-    console.error('Speaker registration error:', error);
-    
-    // Handle specific Prisma errors
-    if (error.code === 'P2000') {
+    console.error("Speaker registration error:", error);
+
+    // Prisma error handling (yours)
+    if (error.code === "P2000") {
       return res.status(400).json({
         message: "One or more fields contain data that is too long. Please check your input and try again.",
-        success: false
+        success: false,
       });
     }
-    
-    if (error.code === 'P2002') {
+    if (error.code === "P2002") {
       return res.status(400).json({
         message: "A submission with this email address already exists. Please use a different email or contact support.",
-        success: false
+        success: false,
       });
     }
-    
-    if (error.code === 'P2003') {
+    if (error.code === "P2003") {
       return res.status(400).json({
         message: "Invalid reference data. Please check your form and try again.",
-        success: false
+        success: false,
       });
     }
-    
+
     res.status(500).json({
       message: "Error submitting paper. Please try again later or contact support if the problem persists.",
       error: error.message,
@@ -304,18 +384,18 @@ export const getSpeakers = async (req, res) => {
   try {
     const { page = 1, limit = 10, status, search } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    // Build where clause
+
     const where = {};
-    if (status && status !== 'ALL') {
+    if (status && status !== "ALL") {
       where.reviewStatus = status;
     }
     if (search) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-        { paperTitle: { contains: search, mode: 'insensitive' } },
-        { institutionName: { contains: search, mode: 'insensitive' } }
+        { name: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        { paperTitle: { contains: search, mode: "insensitive" } },
+        { institutionName: { contains: search, mode: "insensitive" } },
+        { paperId: { contains: search, mode: "insensitive" } }, // <— allow searching by Paper ID
       ];
     }
 
@@ -324,29 +404,25 @@ export const getSpeakers = async (req, res) => {
         where,
         skip,
         take: parseInt(limit),
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: {
           referredBy: {
-            select: {
-              id: true,
-              email: true,
-              referralCode: true
-            }
+            select: { id: true, email: true, referralCode: true }
           }
         }
       }),
       prisma.speaker.count({ where })
     ]);
 
-    res.status(200).json({ 
-      speakers, 
+    res.status(200).json({
+      speakers,
       total,
       page: parseInt(page),
       totalPages: Math.ceil(total / parseInt(limit)),
-      success: true 
+      success: true
     });
   } catch (error) {
-    console.error('Error retrieving speakers:', error);
+    console.error("Error retrieving speakers:", error);
     res.status(500).json({
       message: "Error retrieving speakers",
       error: error.message,
@@ -354,6 +430,7 @@ export const getSpeakers = async (req, res) => {
     });
   }
 };
+
 
 export const getSpeakerById = async (req, res) => {
   try {
@@ -501,6 +578,43 @@ export const getSpeakerStats = async (req, res) => {
       message: "Error retrieving speaker statistics",
       error: error.message,
       success: false,
+    });
+  }
+};
+
+export const uploadTurnitinReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const speaker = await prisma.speaker.findUnique({ where: { id } });
+    if (!speaker) {
+      return res.status(404).json({ message: "Speaker not found", success: false });
+    }
+
+    if (!req.file && !(req.files && req.files.turnitinReport && req.files.turnitinReport[0])) {
+      return res.status(400).json({ message: "No report file uploaded", success: false });
+    }
+
+    // Cloudinary multer gives you .path
+    const reportFile = req.file ? req.file : req.files.turnitinReport[0];
+    const url = reportFile.path;
+
+    const updated = await prisma.speaker.update({
+      where: { id },
+      data: { turnitinReportUrl: url }
+    });
+
+    return res.status(200).json({
+      message: "Turnitin report uploaded successfully",
+      speaker: updated,
+      success: true
+    });
+  } catch (err) {
+    console.error("Error uploading Turnitin report:", err);
+    return res.status(500).json({
+      message: "Failed to upload Turnitin report",
+      error: err.message,
+      success: false
     });
   }
 };

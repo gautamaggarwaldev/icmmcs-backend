@@ -160,11 +160,48 @@ export const updateCommitteeMember = async (req, res) => {
 };
 
 // Delete committee member (Super Admin only)
+// export const deleteCommitteeMember = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // Check if member exists
+//     const existingMember = await prisma.reviewingCommittee.findUnique({
+//       where: { id }
+//     });
+
+//     if (!existingMember) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Committee member not found'
+//       });
+//     }
+
+//     await prisma.reviewingCommittee.delete({
+//       where: { id }
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Committee member deleted successfully'
+//     });
+//   } catch (error) {
+//     console.error('Error deleting committee member:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to delete committee member',
+//       error: error.message
+//     });
+//   }
+// };
+
+
+
+// Delete committee member (Super Admin only)
 export const deleteCommitteeMember = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if member exists
+    // 1) Ensure the member exists (we need its email to find the source expression)
     const existingMember = await prisma.reviewingCommittee.findUnique({
       where: { id }
     });
@@ -176,13 +213,25 @@ export const deleteCommitteeMember = async (req, res) => {
       });
     }
 
-    await prisma.reviewingCommittee.delete({
-      where: { id }
-    });
+    const email = (existingMember.email || '').trim();
 
-    res.status(200).json({
+    // 2) Atomically delete the committee member and reset any matching reviewer expressions
+    const [deleted, resetResult] = await prisma.$transaction([
+      prisma.reviewingCommittee.delete({ where: { id } }),
+      // Only flip expressions that were ACCEPTED (i.e., “came from” an accepted application)
+      prisma.ReviewerExpression.updateMany({
+        where: {
+          email: email,
+          status: 'ACCEPTED'
+        },
+        data: { status: 'REJECTED' }
+      })
+    ]);
+
+    return res.status(200).json({
       success: true,
-      message: 'Committee member deleted successfully'
+      message: 'Committee member deleted successfully',
+      reviewerExpressionsReset: resetResult.count // how many expressions were set back to PENDING
     });
   } catch (error) {
     console.error('Error deleting committee member:', error);
@@ -193,6 +242,7 @@ export const deleteCommitteeMember = async (req, res) => {
     });
   }
 };
+
 
 // Send speaker to committee for review
 export const sendSpeakerToCommittee = async (req, res) => {

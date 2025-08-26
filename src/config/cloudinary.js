@@ -5,17 +5,31 @@ import multer from 'multer';
 // Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
+  api_key:    process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Configure Cloudinary storage for paper submissions
+/**
+ * Helper to build a clean public_id from original filename
+ * Keeps your existing naming style.
+ */
+function makePublicId(file, prefix) {
+  const base = (file.originalname || 'file');
+  const nameNoExt = base.includes('.') ? base.substring(0, base.lastIndexOf('.')) : base;
+  const ext = base.includes('.') ? base.substring(base.lastIndexOf('.') + 1) : '';
+  return `${prefix}_${Date.now()}_${nameNoExt}${ext ? '.' + ext : ''}`;
+}
+
+// ===============================
+// Storage for paper submissions
+// (speaker paper, supplementary, source code, Turnitin report)
+// ===============================
 const paperStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary,
   params: (req, file) => {
     let folder = 'conference-papers';
     let resourceType = 'raw';
-    
+
     if (file.fieldname === 'paperFile') {
       folder = 'conference-papers/papers';
       resourceType = 'raw';
@@ -25,34 +39,39 @@ const paperStorage = new CloudinaryStorage({
     } else if (file.fieldname === 'sourceCodeFile') {
       folder = 'conference-papers/source-code';
       resourceType = 'raw';
+    } else if (file.fieldname === 'turnitinReport') {
+      // NEW: Turnitin reports go to a separate folder
+      folder = 'Turnetin_Reports'; // (spelling per your request)
+      resourceType = 'raw';
     }
-    
+
     return {
-      folder: folder,
+      folder,
       resource_type: resourceType,
-      public_id: `${file.fieldname}_${Date.now()}_${file.originalname.split('.')[0]}.${file.originalname.split('.').pop()}`
+      public_id: makePublicId(file, file.fieldname),
     };
   }
 });
 
-// Create multer upload middleware for paper submissions
-export const upload = multer({ 
+// Multer middleware for paper + related uploads (including Turnitin report)
+export const upload = multer({
   storage: paperStorage,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit for supplementary files
+    fileSize: 50 * 1024 * 1024, // 50MB
   },
   fileFilter: (req, file, cb) => {
-    console.log('Paper submission file upload attempt:', {
+    console.log('File upload attempt:', {
       fieldname: file.fieldname,
       filename: file.originalname,
       mimetype: file.mimetype
     });
-    
-    const fileExtension = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
-    
+
+    const lower = (file.originalname || '').toLowerCase();
+    const fileExtension = lower.slice(lower.lastIndexOf('.'));
+
     // Different allowed types for different file fields
     if (file.fieldname === 'paperFile') {
-      // Paper file - PDF, DOCX, and LaTeX
+      // PDF, DOCX, LaTeX
       const allowedTypes = [
         'application/pdf',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -60,17 +79,17 @@ export const upload = multer({
         'text/x-tex',
         'application/x-latex',
         'text/x-latex',
-        'text/plain'  // Some systems send .tex files as text/plain
+        'text/plain'  // some systems send .tex as text/plain
       ];
       const allowedExts = ['.pdf', '.docx', '.tex', '.latex'];
-      
+
       if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Paper file must be in PDF, DOCX, or LaTeX (.tex, .latex) format!'), false);
+        return cb(null, true);
       }
+      return cb(new Error('Paper file must be PDF, DOCX, or LaTeX (.tex, .latex)!'), false);
+
     } else if (file.fieldname === 'supplementaryFile') {
-      // Supplementary files - various document formats
+      // PDF, DOCX, ZIP, RAR
       const allowedTypes = [
         'application/pdf',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -80,14 +99,14 @@ export const upload = multer({
         'application/x-zip-compressed'
       ];
       const allowedExts = ['.pdf', '.docx', '.zip', '.rar'];
-      
+
       if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Supplementary file must be PDF, DOCX, ZIP, or RAR format!'), false);
+        return cb(null, true);
       }
+      return cb(new Error('Supplementary file must be PDF, DOCX, ZIP, or RAR!'), false);
+
     } else if (file.fieldname === 'sourceCodeFile') {
-      // Source code files - various programming file formats
+      // ZIP/RAR or common code/text files
       const allowedTypes = [
         'application/zip',
         'application/x-zip-compressed',
@@ -102,38 +121,46 @@ export const upload = multer({
         'text/css'
       ];
       const allowedExts = ['.zip', '.rar', '.py', '.java', '.cpp', '.c', '.js', '.html', '.css'];
-      
+
       if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Source code file must be ZIP, RAR, or programming file format!'), false);
+        return cb(null, true);
       }
+      return cb(new Error('Source code must be ZIP, RAR, or a programming file!'), false);
+
+    } else if (file.fieldname === 'turnitinReport') {
+      // NEW: Turnitin report — PDF or DOCX
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ];
+      const allowedExts = ['.pdf', '.docx'];
+
+      if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
+        return cb(null, true);
+      }
+      return cb(new Error('Turnitin report must be PDF or DOCX!'), false);
+
     } else {
-      cb(new Error('Unknown file field!'), false);
+      return cb(new Error('Unknown file field!'), false);
     }
   }
 });
 
-// Legacy single file upload for backward compatibility
+// ===============================
+// Legacy single file upload (backward-compatible)
+// ===============================
 const legacyStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary,
   params: {
     folder: 'conference-papers',
     resource_type: 'raw',
-    public_id: (req, file) => {
-      const timestamp = Date.now();
-      const filename = file.originalname.split('.')[0];
-      const extension = file.originalname.split('.').pop();
-      return `paper_${timestamp}_${filename}.${extension}`;
-    },
+    public_id: (req, file) => makePublicId(file, 'paper'),
   },
 });
 
-export const legacyUpload = multer({ 
+export const legacyUpload = multer({
   storage: legacyStorage,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     const allowedMimeTypes = [
       'application/pdf',
@@ -145,28 +172,26 @@ export const legacyUpload = multer({
       'application/x-latex',
       'text/x-latex'
     ];
-    
     const allowedExtensions = ['.pdf', '.docx', '.tex', '.latex'];
-    const fileExtension = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
-    
-    const mimeTypeAllowed = allowedMimeTypes.includes(file.mimetype);
-    const extensionAllowed = allowedExtensions.includes(fileExtension);
-    
-    if (mimeTypeAllowed || extensionAllowed) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF, DOCX, and LaTeX (.tex, .latex) files are allowed!'), false);
+    const lower = (file.originalname || '').toLowerCase();
+    const fileExtension = lower.slice(lower.lastIndexOf('.'));
+
+    if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
+      return cb(null, true);
     }
+    return cb(new Error('Only PDF, DOCX, and LaTeX (.tex, .latex) files are allowed!'), false);
   }
 });
 
-// Create separate storage for keynote speakers (supports multiple file types)
+// ===============================
+// Keynote speakers multi-type upload
+// ===============================
 const keynoteStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary,
   params: (req, file) => {
     let folder = 'keynote-speakers';
     let resourceType = 'raw';
-    
+
     if (file.fieldname === 'cvFile') {
       folder = 'keynote-speakers/cv';
       resourceType = 'raw';
@@ -177,30 +202,27 @@ const keynoteStorage = new CloudinaryStorage({
       folder = 'keynote-speakers/presentations';
       resourceType = 'raw';
     }
-    
+
     return {
-      folder: folder,
+      folder,
       resource_type: resourceType,
-      public_id: `${file.fieldname}_${Date.now()}_${file.originalname.split('.')[0]}.${file.originalname.split('.').pop()}`
+      public_id: makePublicId(file, file.fieldname),
     };
   }
 });
 
-// Create multer upload middleware for keynote speakers
 export const keynoteUpload = multer({
   storage: keynoteStorage,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     console.log('Keynote file upload attempt:', {
       fieldname: file.fieldname,
       filename: file.originalname,
       mimetype: file.mimetype
     });
-    
-    const fileExtension = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
-    
+    const lower = (file.originalname || '').toLowerCase();
+    const fileExtension = lower.slice(lower.lastIndexOf('.'));
+
     if (file.fieldname === 'cvFile') {
       const allowedTypes = [
         'application/pdf',
@@ -213,21 +235,19 @@ export const keynoteUpload = multer({
         'text/x-latex'
       ];
       const allowedExts = ['.pdf', '.docx', '.tex', '.latex'];
-      
       if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        cb(null, true);
-      } else {
-        cb(new Error('CV must be PDF, DOCX, or LaTeX format!'), false);
+        return cb(null, true);
       }
+      return cb(new Error('CV must be PDF, DOCX, or LaTeX!'), false);
+
     } else if (file.fieldname === 'photoFile') {
       const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
       const allowedExts = ['.jpg', '.jpeg', '.png'];
-      
       if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Photo must be JPG, JPEG, or PNG format!'), false);
+        return cb(null, true);
       }
+      return cb(new Error('Photo must be JPG, JPEG, or PNG!'), false);
+
     } else if (file.fieldname === 'presentationFile') {
       const allowedTypes = [
         'application/pdf',
@@ -235,14 +255,13 @@ export const keynoteUpload = multer({
         'application/vnd.openxmlformats-officedocument.presentationml.presentation'
       ];
       const allowedExts = ['.pdf', '.ppt', '.pptx'];
-      
       if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Presentation must be PDF, PPT, or PPTX format!'), false);
+        return cb(null, true);
       }
+      return cb(new Error('Presentation must be PDF, PPT, or PPTX!'), false);
+
     } else {
-      cb(new Error('Unknown file field!'), false);
+      return cb(new Error('Unknown file field!'), false);
     }
   }
 });
@@ -250,14 +269,14 @@ export const keynoteUpload = multer({
 const reviewerExpressionStorage = new CloudinaryStorage({
   cloudinary,
   params: (req, file) => {
-    const original = file.originalname || "file";
-    const nameNoExt = original.includes(".") ? original.substring(0, original.lastIndexOf(".")) : original;
-    const ext = original.includes(".") ? original.substring(original.lastIndexOf(".") + 1) : undefined;
+    const original = file.originalname || 'file';
+    const nameNoExt = original.includes('.') ? original.substring(0, original.lastIndexOf('.')) : original;
+    const ext = original.includes('.') ? original.substring(original.lastIndexOf('.') + 1) : undefined;
     return {
-      folder: "cv_reviewer_expression",    // <-- requested folder
-      resource_type: "raw",                // pdf/docx are non-images
-      public_id: `cv_${Date.now()}_${nameNoExt}`,   // do NOT include extension here
-      format: ext                          // let Cloudinary add extension
+      folder: 'cv_reviewer_expression',
+      resource_type: 'raw',
+      public_id: `cv_${Date.now()}_${nameNoExt}`,
+      format: ext,
     };
   }
 });
@@ -266,27 +285,27 @@ export const reviewerExpressionUpload = multer({
   storage: reviewerExpressionStorage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    console.log("Reviewer Expression file upload attempt:", {
+    console.log('Reviewer Expression file upload attempt:', {
       fieldname: file.fieldname,
       filename: file.originalname,
       mimetype: file.mimetype
     });
-    const original = (file.originalname || "").toLowerCase();
-    const ext = original.slice(original.lastIndexOf("."));
+    const original = (file.originalname || '').toLowerCase();
+    const ext = original.slice(original.lastIndexOf('.'));
     const allowedTypes = [
-      "application/pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ];
-    const allowedExts = [".pdf", ".docx"];
+    const allowedExts = ['.pdf', '.docx'];
 
-    if (file.fieldname !== "cvFile") {
+    if (file.fieldname !== 'cvFile') {
       return cb(new Error("Unknown file field for reviewer expression (expected 'cvFile')"), false);
     }
     if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
       return cb(null, true);
     }
-    return cb(new Error("CV must be PDF or DOCX format!"), false);
+    return cb(new Error('CV must be PDF or DOCX!'), false);
   }
 });
 
-export default cloudinary; 
+export default cloudinary;

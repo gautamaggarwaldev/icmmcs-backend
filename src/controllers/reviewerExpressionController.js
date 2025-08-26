@@ -168,37 +168,141 @@ export const getReviewerExpressionById = async (req, res) => {
  * Super Admin only
  * body: { status: "PENDING" | "ACCEPTED" | "REJECTED" }
  */
+// export const updateReviewerExpressionStatus = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { status } = req.body;
+
+//     if (!["PENDING", "ACCEPTED", "REJECTED"].includes(status)) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Invalid status" });
+//     }
+
+//     const updated = await prisma.ReviewerExpression.update({
+//       where: { id },
+//       data: { status },
+//     });
+
+//     return res.json({
+//       success: true,
+//       message: "Status updated",
+//       data: updated,
+//     });
+//   } catch (error) {
+//     console.error("updateReviewerExpressionStatus error:", error);
+//     if (error.code === "P2025") {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Reviewer record not found" });
+//     }
+//     return res.status(500).json({ success: false, message: "Server error" });
+//   }
+// };
+
+
+
 export const updateReviewerExpressionStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!["PENDING", "ACCEPTED", "REJECTED"].includes(status)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid status" });
+    const VALID = ["PENDING", "ACCEPTED", "REJECTED"];
+    if (!VALID.includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid status" });
     }
 
-    const updated = await prisma.ReviewerExpression.update({
-      where: { id },
-      data: { status },
+    // We need existing data to sync on ACCEPTED
+    const existing = await prisma.ReviewerExpression.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Reviewer record not found" });
+    }
+
+    // subjectArea (Json) -> string for ReviewingCommittee.expertise
+    const toExpertiseString = (v) => {
+      if (Array.isArray(v)) return v.filter(Boolean).join(", ");
+      if (typeof v === "string") return v.trim();
+      if (v && typeof v === "object") return Object.values(v).filter(Boolean).join(", ");
+      return "";
+    };
+
+    // NEW: define normPhone used below
+    const normPhone = (p) => (p == null ? null : String(p).trim() || null);
+
+    const adminId = req.admin?.id; // set by requireSuperAdmin
+    if (status === "ACCEPTED" && !adminId) {
+      return res.status(500).json({ success: false, message: "Admin context missing (createdBy required)" });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1) Update ReviewerExpression status
+      const updated = await tx.ReviewerExpression.update({
+        where: { id },
+        data: { status },
+      });
+
+      // 2) If ACCEPTED, upsert into ReviewingCommittee using email as unique key
+      let committee = null;
+      if (status === "ACCEPTED") {
+        const email = (existing.email || "").trim();
+        if (email) {
+          committee = await tx.reviewingCommittee.upsert({
+            where: { email }, // @unique on ReviewingCommittee.email
+            create: {
+              name: existing.name,
+              email,
+              designation: existing.currentJobTitle,
+              institution: existing.institution,
+              expertise: toExpertiseString(existing.subjectArea),
+              phone: normPhone(existing.phone),     // ← now defined
+              isActive: true,
+              createdBy: adminId,
+            },
+            update: {
+              name: existing.name,
+              designation: existing.currentJobTitle,
+              institution: existing.institution,
+              expertise: toExpertiseString(existing.subjectArea),
+              phone: normPhone(existing.phone),     // ← now defined
+              isActive: true,
+            },
+          });
+        }
+      }
+
+      return { updated, committee };
     });
 
     return res.json({
       success: true,
       message: "Status updated",
-      data: updated,
+      data: result.updated,
+      syncedToCommittee: Boolean(result.committee),
+      committeeRecord: result.committee
+        ? {
+            id: result.committee.id,
+            name: result.committee.name,
+            email: result.committee.email,
+            designation: result.committee.designation,
+            institution: result.committee.institution,
+            expertise: result.committee.expertise,
+            isActive: result.committee.isActive,
+            createdBy: result.committee.createdBy,
+            createdAt: result.committee.createdAt,
+            updatedAt: result.committee.updatedAt,
+          }
+        : null,
     });
   } catch (error) {
     console.error("updateReviewerExpressionStatus error:", error);
     if (error.code === "P2025") {
-      return res
-        .status(404)
-        .json({ success: false, message: "Reviewer record not found" });
+      return res.status(404).json({ success: false, message: "Reviewer record not found" });
     }
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+
 
 /**
  * DELETE /api/reviewer-expression/:id

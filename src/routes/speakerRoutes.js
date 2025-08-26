@@ -5,7 +5,8 @@ import {
   getSpeakerById, 
   updateSpeakerStatus, 
   deleteSpeaker, 
-  getSpeakerStats 
+  getSpeakerStats,
+  uploadTurnitinReport
 } from "../controllers/speakerController.js";
 import { upload } from "../config/cloudinary.js";
 
@@ -61,5 +62,13 @@ router.patch("/speakers/:id/status", updateSpeakerStatus);
 
 // Delete speaker (admin only)
 router.delete("/speakers/:id", deleteSpeaker);
+
+// Upload turnitin report
+router.post(
+  "/speakers/:id/turnitin-report",
+  upload.single('turnitinReport'),
+  handleUploadError,
+  uploadTurnitinReport
+);
 
 export default router;

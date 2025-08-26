@@ -7,6 +7,27 @@ import {
   sponsorConfirmationTemplate,
   sponsorAdminNotificationTemplate,
 } from "../utils/emailTemplates/userRegistration.js";
+import { isMailerBlocked, nextSendTime, shouldCooldownFor, tripMailerCooldown } from "./mailerGuard.js";
+
+export async function sendMailSafe(options) {
+  if (isMailerBlocked()) {
+    console.warn(
+      `[MailerGuard] Blocked; skipping send to ${options.to}. Retry after ${new Date(nextSendTime()).toISOString()}`
+    );
+    return { skipped: true, reason: "mailer_cooldown" };
+  }
+
+  try {
+    const info = await transporter.sendMail(options);
+    return info;
+  } catch (err) {
+    if (shouldCooldownFor(err)) {
+      // Enter cooldown so we stop hammering Gmail until quota resets
+      tripMailerCooldown();
+    }
+    throw err;
+  }
+}
 
 function validateUserData(userData) {
   if (!userData.email || !userData.name) {
@@ -168,30 +189,367 @@ export async function sendKeynoteSpeakerRegistrationEmail(keynoteSpeakerData) {
   }
 }
 
+// export async function sendSpeakerToCommitteeEmail(speakerData, committeeMember) {
+//   const committeeMailOptions = {
+//     from: process.env.EMAIL_USER,
+//     to: committeeMember.email,
+//     subject: `ICMMCS 2025 | Presenter Review Request: ${speakerData.name}`,
+//     html: speakerReviewCommitteeTemplate(speakerData, committeeMember),
+//   };
+
+//   try {
+//     await transporter.sendMail(committeeMailOptions);
+//     console.log(
+//       `Speaker review email sent successfully to committee member ${committeeMember.email}`
+//     );
+//     return true;
+//   } catch (error) {
+//     console.error("Committee email service error:", {
+//       error: error.message,
+//       committeeMember: committeeMember.email,
+//       speaker: speakerData.email,
+//       timestamp: new Date().toISOString(),
+//     });
+//     throw error; // Re-throw to handle in controller
+//   }
+// }
+
+
 export async function sendSpeakerToCommitteeEmail(speakerData, committeeMember) {
+  const attachments = [];
+  // Prefer the newer paperFileUrl if set; fallback to legacy fileUrl
+  const paperUrl = speakerData.paperFileUrl || speakerData.fileUrl;
+  if (paperUrl) {
+    attachments.push({
+      filename: `${(speakerData.paperId || 'Paper')}.pdf`,
+      path: paperUrl
+    });
+  }
+  if (speakerData.turnitinReportUrl) {
+    attachments.push({
+      filename: `${(speakerData.paperId || 'Paper')}_Turnitin_Report.pdf`,
+      path: speakerData.turnitinReportUrl
+    });
+  }
+
   const committeeMailOptions = {
     from: process.env.EMAIL_USER,
     to: committeeMember.email,
     subject: `ICMMCS 2025 | Presenter Review Request: ${speakerData.name}`,
     html: speakerReviewCommitteeTemplate(speakerData, committeeMember),
+    attachments // <— include both
   };
 
   try {
     await transporter.sendMail(committeeMailOptions);
-    console.log(
-      `Speaker review email sent successfully to committee member ${committeeMember.email}`
-    );
+    console.log(`Speaker review email sent successfully to ${committeeMember.email}`);
     return true;
   } catch (error) {
-    console.error("Committee email service error:", {
-      error: error.message,
-      committeeMember: committeeMember.email,
-      speaker: speakerData.email,
-      timestamp: new Date().toISOString(),
-    });
-    throw error; // Re-throw to handle in controller
+    console.error("Committee email service error:", { error: error.message, committeeMember: committeeMember.email, speaker: speakerData.email, timestamp: new Date().toISOString() });
+    throw error;
   }
 }
+
+
+// export async function sendReviewReminderEmail(speakerData, committeeMember) {
+//   const attachments = [];
+//   const paperUrl = speakerData.paperFileUrl || speakerData.fileUrl;
+//   if (paperUrl) {
+//     attachments.push({ filename: `${(speakerData.paperId || "Paper")}.pdf`, path: paperUrl });
+//   }
+//   if (speakerData.turnitinReportUrl) {
+//     attachments.push({ filename: `${(speakerData.paperId || "Paper")}_Turnitin_Report.pdf`, path: speakerData.turnitinReportUrl });
+//   }
+
+//   const decisionMailto = (decision) => {
+//     const subject = encodeURIComponent(
+//       `[ICMMCS Review] ${decision} — ${speakerData.paperId || ""} ${speakerData.paperTitle || ""}`.trim()
+//     );
+//     const body = encodeURIComponent(
+//       `Decision: ${decision}\n` +
+//       `Paper ID: ${speakerData.paperId || ""}\n` +
+//       `Title: ${speakerData.paperTitle || ""}\n` +
+//       `Author: ${speakerData.name || ""} <${speakerData.email || ""}>\n` +
+//       `Comments: (optional)\n\n` +
+//       `— Sent automatically by ICMMCS system`
+//     );
+//     return `mailto:${process.env.ADMIN_EMAIL}?subject=${subject}&body=${body}`;
+//   };
+
+//   const html = `
+//     <div style="font-family: Arial, sans-serif; line-height:1.6; color:#333;">
+//       <h2 style="margin-bottom:4px;">Gentle reminder to review</h2>
+//       <p style="margin-top:0;">Dear ${committeeMember.name || "Reviewer"},</p>
+//       <p>
+//         Please review <strong>${speakerData.paperId || ""}</strong>
+//         ${speakerData.paperTitle ? ` — <em>${speakerData.paperTitle}</em>` : ""}.
+//         Click a quick action to email your decision to the admin:
+//       </p>
+//       <p style="margin:18px 0;">
+//         <a href="${decisionMailto("APPROVED")}" style="padding:10px 14px; text-decoration:none; border-radius:6px; background:#22c55e; color:#fff; margin-right:8px;">Approve</a>
+//         <a href="${decisionMailto("REJECTED")}" style="padding:10px 14px; text-decoration:none; border-radius:6px; background:#ef4444; color:#fff; margin-right:8px;">Reject</a>
+//         <a href="${decisionMailto("NEEDS_REVISION")}" style="padding:10px 14px; text-decoration:none; border-radius:6px; background:#f59e0b; color:#fff;">Need Revision</a>
+//       </p>
+//       <p style="font-size:13px; color:#555;">
+//         If buttons don’t work, reply with: <strong>APPROVED</strong>, <strong>REJECTED</strong>, or <strong>NEEDS_REVISION</strong>.
+//         You can also email <a href="mailto:${process.env.ADMIN_EMAIL}">${process.env.ADMIN_EMAIL}</a> directly.
+//       </p>
+//       <hr/>
+//       <p style="font-size:12px; color:#888;">Paper attachments are included for your convenience.</p>
+//     </div>`;
+
+//   await transporter.sendMail({
+//     from: process.env.EMAIL_USER,
+//     to: committeeMember.email,
+//     subject: `Reminder: Review pending — ${speakerData.paperId || ""} ${speakerData.paperTitle || ""}`.trim(),
+//     html,
+//     attachments
+//   });
+
+//   return true;
+// }
+
+
+
+
+export async function sendReviewReminderEmail(speakerData, committeeMember) {
+  // --- attachments (same behavior as before)
+  const attachments = [];
+  const paperUrl = speakerData.paperFileUrl || speakerData.fileUrl;
+  if (paperUrl) {
+    attachments.push({ filename: `${(speakerData.paperId || "Paper")}.pdf`, path: paperUrl });
+  }
+  if (speakerData.turnitinReportUrl) {
+    attachments.push({
+      filename: `${(speakerData.paperId || "Paper")}_Turnitin_Report.pdf`,
+      path: speakerData.turnitinReportUrl,
+    });
+  }
+
+  // --- helpers
+  const esc = (v) =>
+    String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const reviewCount = typeof speakerData.reviewReminderCount === "number" ? speakerData.reviewReminderCount : null;
+
+  const decisionMailto = (decision) => {
+    const subject = encodeURIComponent(
+      `[ICMMCS Review] ${decision} — ${speakerData.paperId || ""} ${speakerData.paperTitle || ""}`.trim()
+    );
+    const body = encodeURIComponent(
+      `Decision: ${decision}\n` +
+        `Paper ID: ${speakerData.paperId || ""}\n` +
+        `Title: ${speakerData.paperTitle || ""}\n` +
+        `Author: ${speakerData.name || ""} <${speakerData.email || ""}>\n` +
+        `Comments:\n\n— Sent automatically by ICMMCS system`
+    );
+    return `mailto:${process.env.ADMIN_EMAIL}?subject=${subject}&body=${body}`;
+  };
+
+  // Optional: configurable review portal URL; falls back to a sensible default
+  const baseReviewUrl = process.env.REVIEW_PORTAL_URL || "https://www.icmmcs.org/paper-review.html";
+  const reviewUrl = `${baseReviewUrl}?id=${encodeURIComponent(speakerData.id || "")}`;
+
+  // convenience labels
+  const authorName = esc(speakerData.name);
+  const authorEmail = esc(speakerData.email);
+  const phone = esc(speakerData.phone || "");
+  const country = esc(speakerData.country || "");
+  const inst = esc(speakerData.institutionName || "");
+  const attendeeType = esc(speakerData.attendeeType || "");
+  const paperId = esc(speakerData.paperId || speakerData.id || "");
+  const paperTitle = esc(speakerData.paperTitle || "Untitled Submission");
+  const createdOn = speakerData.createdAt ? new Date(speakerData.createdAt).toLocaleDateString() : "";
+  const adminEmail = esc(process.env.ADMIN_EMAIL || "info@icmmcs.org");
+
+  // --- subject + preheader
+  const subject =
+    `Gentle Reminder: Review pending — ${paperId} ${paperTitle}`.replace(/\s+/g, " ").trim() +
+    (reviewCount != null ? ` (reminder #${reviewCount + 1})` : "");
+
+  const preheader =
+    "Action needed: please review this submission and send your decision (Approve / Needs Revision / Reject).";
+
+  // --- HTML (table-based, inline-styled for client compatibility)
+  const html = `
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+  ${esc(preheader)}
+</div>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#f2f4f6;padding:16px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:700px;max-width:700px;background:#ffffff;border-radius:10px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">
+        <!-- Header -->
+        <tr>
+          <td style="padding:28px 24px;background:linear-gradient(135deg,#019087,#40c4ba);color:#ffffff;">
+            <h1 style="margin:0;font-size:22px;line-height:1.3;">Gentle Reminder — Review Required</h1>
+            <p style="margin:6px 0 0 0;font-size:14px;opacity:.95;">
+              ICMMCS 2025 • International Conference on Mathematics, Management & Computer Science
+            </p>
+          </td>
+        </tr>
+
+        <!-- Summary card -->
+        <tr>
+          <td style="padding:0 24px 24px 24px;background:#f9f9f9;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#ffffff;border-left:4px solid #019087;border-radius:6px;">
+              <tr>
+                <td style="padding:18px 18px 10px 18px;">
+                  <h2 style="margin:0 0 8px 0;font-size:18px;color:#222;">Submission Summary</h2>
+                  <span style="display:inline-block;background:#fff3cd;color:#856404;padding:6px 12px;border-radius:16px;font-size:12px;">
+                    ⏰ Pending reviewer decision
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 18px 18px 18px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;font-size:14px;color:#333;">
+                    <tr>
+                      <td style="padding:6px 0;width:40%;color:#019087;font-weight:bold;">Paper ID</td>
+                      <td style="padding:6px 0;">${paperId}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px 0;color:#019087;font-weight:bold;">Title</td>
+                      <td style="padding:6px 0;color:#019087;font-weight:bold;">${paperTitle}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px 0;color:#019087;font-weight:bold;">Author</td>
+                      <td style="padding:6px 0;">${authorName}${authorEmail ? ` &lt;${authorEmail}&gt;` : ""}</td>
+                    </tr>
+                    ${phone ? `<tr><td style="padding:6px 0;color:#019087;font-weight:bold;">Phone</td><td style="padding:6px 0;">${phone}</td></tr>` : ""}
+                    ${country ? `<tr><td style="padding:6px 0;color:#019087;font-weight:bold;">Country</td><td style="padding:6px 0;">${country}</td></tr>` : ""}
+                    ${inst ? `<tr><td style="padding:6px 0;color:#019087;font-weight:bold;">Institution</td><td style="padding:6px 0;">${inst}</td></tr>` : ""}
+                    ${attendeeType ? `<tr><td style="padding:6px 0;color:#019087;font-weight:bold;">Attendee Type</td><td style="padding:6px 0;">${attendeeType}</td></tr>` : ""}
+                    ${createdOn ? `<tr><td style="padding:6px 0;color:#019087;font-weight:bold;">Registered On</td><td style="padding:6px 0;">${createdOn}</td></tr>` : ""}
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Files -->
+        <tr>
+          <td style="padding:0 24px 24px 24px;background:#f9f9f9;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#ffffff;border-left:4px solid #019087;border-radius:6px;">
+              <tr>
+                <td style="padding:18px;">
+                  <h2 style="margin:0 0 10px 0;font-size:18px;color:#222;">Submitted Documents</h2>
+                  ${
+                    paperUrl
+                      ? `<a href="${esc(paperUrl)}" target="_blank" style="display:inline-block;margin:4px 6px 0 0;padding:8px 12px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;color:#495057;text-decoration:none;">📄 Download Paper</a>`
+                      : `<span style="color:#dc3545;">❌ No paper file submitted</span>`
+                  }
+                  ${
+                    speakerData.turnitinReportUrl
+                      ? `<a href="${esc(speakerData.turnitinReportUrl)}" target="_blank" style="display:inline-block;margin:4px 0 0 0;padding:8px 12px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;color:#495057;text-decoration:none;">📑 Download Turnitin Report</a>`
+                      : ``
+                  }
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Actions -->
+        <tr>
+          <td style="padding:0 24px 24px 24px;background:#f9f9f9;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#ffffff;border:2px solid #019087;border-radius:8px;">
+              <tr>
+                <td align="center" style="padding:18px;">
+                  <h2 style="margin:0 0 6px 0;font-size:18px;color:#019087;">Review Actions Required</h2>
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#555;">Please review and provide your recommendation:</p>
+
+                  <!-- View / Open -->
+                  <div style="margin:0 0 14px 0;">
+                    <a href="${esc(reviewUrl)}" target="_blank"
+                       style="display:inline-block;background:#019087;color:#ffffff;padding:12px 18px;border-radius:6px;text-decoration:none;font-weight:bold;">
+                      📋 Open Submission
+                    </a>
+                  </div>
+
+                  <!-- Decision buttons -->
+                  <div style="margin:0 0 8px 0;">
+                    <a href="${decisionMailto("APPROVED")}" style="display:inline-block;background:#28a745;color:#ffffff;padding:10px 14px;border-radius:6px;text-decoration:none;font-weight:bold;margin-right:6px;">✅ Approve</a>
+                    <a href="${decisionMailto("NEEDS_REVISION")}" style="display:inline-block;background:#ffc107;color:#000000;padding:10px 14px;border-radius:6px;text-decoration:none;font-weight:bold;margin-right:6px;">📝 Needs Revision</a>
+                    <a href="${decisionMailto("REJECTED")}" style="display:inline-block;background:#dc3545;color:#ffffff;padding:10px 14px;border-radius:6px;text-decoration:none;font-weight:bold;">❌ Reject</a>
+                  </div>
+
+                  <p style="margin:10px 0 0 0;font-size:12px;color:#666;">
+                    If the buttons don’t work, reply to <a href="mailto:${adminEmail}" style="color:#019087;text-decoration:none;">${adminEmail}</a>
+                    with one of: <strong>APPROVED</strong>, <strong>NEEDS&nbsp;REVISION</strong>, or <strong>REJECTED</strong>.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:10px 24px 24px 24px;background:#f9f9f9;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#ffffff;border-radius:8px;">
+              <tr>
+                <td align="center" style="padding:18px 16px;color:#666;font-size:12px;line-height:1.6;">
+                  <strong>Thank you for contributing to the ICMMCS 2025 review process.</strong><br/>
+                  This is an automated message from the ICMMCS Conference Management System.<br/>
+                  Need help? Email <a href="mailto:${adminEmail}" style="color:#019087;text-decoration:none;">${adminEmail}</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>`.trim();
+
+  // --- Plain-text fallback
+  const text =
+    `Gentle Reminder — Review Required (ICMMCS 2025)\n\n` +
+    `Paper ID: ${paperId}\n` +
+    `Title: ${speakerData.paperTitle || "Untitled Submission"}\n` +
+    `Author: ${speakerData.name || ""} ${speakerData.email ? `<${speakerData.email}>` : ""}\n` +
+    (createdOn ? `Registered On: ${createdOn}\n` : "") +
+    (paperUrl ? `Download Paper: ${paperUrl}\n` : "No paper file submitted\n") +
+    (speakerData.turnitinReportUrl ? `Turnitin Report: ${speakerData.turnitinReportUrl}\n` : "") +
+    `\nActions:\n` +
+    `Open Submission: ${reviewUrl}\n` +
+    `Approve: ${decisionMailto("APPROVED")}\n` +
+    `Needs Revision: ${decisionMailto("NEEDS_REVISION")}\n` +
+    `Reject: ${decisionMailto("REJECTED")}\n` +
+    `\nIf links don’t work, email ${process.env.ADMIN_EMAIL} with one of: APPROVED / NEEDS REVISION / REJECTED.\n`;
+
+  await sendMailSafe({
+    from: process.env.EMAIL_USER,
+    to: committeeMember.email,
+    subject,
+    html,
+    text,
+    attachments,
+  });
+  // await transporter.sendMail({
+  //   from: process.env.EMAIL_USER,
+  //   to: committeeMember.email,
+  //   subject,
+  //   html,
+  //   text,
+  //   attachments,
+  // });
+
+  return true;
+}
+
+
+
+
+
 
 // Email template for keynote speaker confirmation
 const keynoteSpeakerConfirmationTemplate = (keynoteSpeakerData) => `
@@ -368,14 +726,24 @@ const speakerReviewCommitteeTemplate = (speakerData, committeeMember) => `
       <div class="section">
         <h3>📎 Submitted Documents</h3>
         <div class="value">
-          ${speakerData.fileUrl ? 
-            `<a href="${speakerData.fileUrl}" class="file-link" target="_blank">
-               <i class="fas fa-file-pdf"></i> Download Paper/Abstract
-             </a>` : 
+          ${ (speakerData.paperFileUrl || speakerData.fileUrl) ? `
+            <a href="${speakerData.paperFileUrl || speakerData.fileUrl}" class="file-link" target="_blank">
+              <i class="fas fa-file-pdf"></i> Download Paper/Abstract
+            </a>` :
             '<span style="color: #dc3545;">❌ No paper file submitted</span>'
           }
         </div>
+
+        <div class="value" style="margin-top:8px;">
+          ${ speakerData.turnitinReportUrl ? `
+            <a href="${speakerData.turnitinReportUrl}" class="file-link" target="_blank">
+              <i class="fas fa-file-alt"></i> Download Turnitin Report
+            </a>` :
+            '<span style="color: #dc3545;">❌ No Turnitin report uploaded</span>'
+          }
+        </div>
       </div>
+
       
       <div class="section">
         <h3>ℹ️ Registration Details</h3>
@@ -445,7 +813,7 @@ const speakerReviewCommitteeTemplate = (speakerData, committeeMember) => `
         <ul>
           <li><strong>Conference Email:</strong> info@icmmcs.org</li>
           <li><strong>Phone:</strong> +968 93391308 / +91-9540111207</li>
-          <li><strong>Review Deadline:</strong> Please provide your feedback within 7 business days</li>
+          <li><strong>Review Deadline:</strong> Please provide your feedback within 72 hour business days</li>
         </ul>
       </div>
       

@@ -13,7 +13,7 @@ import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import contactRoutes from './routes/contact.js';
 import reviewerExpressionRoutes from "./routes/reviewerExpressionRoutes.js";
-
+import { startReviewReminderJob } from './jobs/reviewReminderJob.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -44,6 +44,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Connect to database
 connectDB();
+startReviewReminderJob();
+
 
 app.get('/', (req, res) => {
     res.send('Hello, World!');
