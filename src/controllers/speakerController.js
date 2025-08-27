@@ -1,5 +1,6 @@
 import { prisma } from "../config/db.js";
 import { sendSpeakerRegistrationEmail } from "../services/emailService.js";
+import cloudinary  from "../config/cloudinary.js";
 
 const validateEmail = (email) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -615,6 +616,88 @@ export const uploadTurnitinReport = async (req, res) => {
       message: "Failed to upload Turnitin report",
       error: err.message,
       success: false
+    });
+  }
+};
+
+// Extract Cloudinary public_id (and resource_type) from a URL
+function extractCloudinaryPublicId(fileUrl) {
+  try {
+    const u = new URL(fileUrl);
+    const parts = u.pathname.split("/").filter(Boolean);
+    // Example: /<cloud_name>/<resource_type>/upload/v171234/Turnetin_Reports/turnitinReport_...pdf
+    const uploadIdx = parts.findIndex((p) => p === "upload");
+    if (uploadIdx === -1) return null;
+
+    // resource type is the segment before 'upload' (e.g. 'raw', 'image')
+    const resourceType = parts[uploadIdx - 1] || "raw";
+
+    // skip optional version segment like v171234
+    let after = parts.slice(uploadIdx + 1);
+    if (after[0] && /^v\d+$/.test(after[0])) after = after.slice(1);
+
+    // the rest joined is the public_id (you included the extension in public_id when uploading)
+    const publicId = after.join("/"); // e.g. Turnetin_Reports/turnitinReport_...pdf
+
+    return { publicId, resourceType };
+  } catch (_) {
+    return null;
+  }
+}
+
+export const deleteTurnitinReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const speaker = await prisma.speaker.findUnique({ where: { id } });
+    if (!speaker) {
+      return res.status(404).json({ message: "Speaker not found", success: false });
+    }
+
+    if (!speaker.turnitinReportUrl) {
+      return res.status(400).json({ message: "No Turnitin report on record", success: false });
+    }
+
+    const info = extractCloudinaryPublicId(speaker.turnitinReportUrl);
+
+    // Try to delete from Cloudinary first (best-effort)
+    if (info?.publicId) {
+      try {
+        const resp = await cloudinary.uploader.destroy(info.publicId, {
+          resource_type: info.resourceType || "raw",
+          invalidate: true,
+        });
+        // resp.result is often "ok" | "not found"
+        console.log("[TurnitinDelete] Cloudinary destroy:", {
+          publicId: info.publicId,
+          resourceType: info.resourceType,
+          result: resp?.result,
+        });
+      } catch (err) {
+        // Don’t block DB cleanup if the file is already gone
+        console.error("[TurnitinDelete] Cloudinary destroy failed:", err?.message);
+      }
+    } else {
+      console.warn("[TurnitinDelete] Could not parse Cloudinary public_id from URL; skipping remote delete");
+    }
+
+    // Clear the URL in DB
+    const updated = await prisma.speaker.update({
+      where: { id },
+      data: { turnitinReportUrl: null },
+    });
+
+    return res.status(200).json({
+      message: "Turnitin report deleted",
+      speaker: updated,
+      success: true,
+    });
+  } catch (err) {
+    console.error("Error deleting Turnitin report:", err);
+    return res.status(500).json({
+      message: "Failed to delete Turnitin report",
+      error: err.message,
+      success: false,
     });
   }
 };
