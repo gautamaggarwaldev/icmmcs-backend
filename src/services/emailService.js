@@ -813,7 +813,7 @@ const speakerReviewCommitteeTemplate = (speakerData, committeeMember) => `
         <ul>
           <li><strong>Conference Email:</strong> info@icmmcs.org</li>
           <li><strong>Phone:</strong> +968 93391308 / +91-9540111207</li>
-          <li><strong>Review Deadline:</strong> Please provide your feedback within 72 hour business days</li>
+          <li><strong>Review Deadline:</strong> Please provide your feedback within 72 hour</li>
         </ul>
       </div>
       
