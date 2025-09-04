@@ -27,7 +27,8 @@ router.post('/', async (req, res) => {
                 email,
                 phone,
                 subject,
-                message
+                message,
+                status: 'PENDING'
             }
         });
 
@@ -74,18 +75,112 @@ router.post('/', async (req, res) => {
 });
 
 // Add route to get all contacts
-router.get('/', async (req, res) => {
-    try {
-        const contacts = await prisma.contact.findMany({
-            orderBy: {
-                createdAt: 'desc'
-            }
-        });
-        res.json(contacts);
-    } catch (error) {
-        console.error('Error fetching contacts:', error);
-        res.status(500).json({ error: 'Failed to fetch contacts' });
+// router.get('/', async (req, res) => {
+//     try {
+//         const contacts = await prisma.contact.findMany({
+//             orderBy: {
+//                 createdAt: 'desc'
+//             }
+//         });
+//         res.json(contacts);
+//     } catch (error) {
+//         console.error('Error fetching contacts:', error);
+//         res.status(500).json({ error: 'Failed to fetch contacts' });
+//     }
+// });
+
+
+
+
+// PATCH /api/contact/:id/status  body: { status: 'IN_PROGRESS' | 'RESOLVED_EMAIL' | 'RESOLVED_PHONE' | 'CLOSED' }
+router.patch('/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status: newStatus } = req.body;
+
+    const contact = await prisma.contact.findUnique({ where: { id } });
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+
+    const cur = contact.status;
+
+    if (cur === 'CLOSED') {
+      return res.status(400).json({ error: 'Closed queries cannot be changed.' });
     }
+
+    // Force flow: PENDING → IN_PROGRESS → (RESOLVED_* | CLOSED)
+    const isResolution = ['RESOLVED_EMAIL', 'RESOLVED_PHONE', 'CLOSED'].includes(newStatus);
+
+    if (cur === 'PENDING' && isResolution) {
+      return res.status(400).json({ error: 'Move to In-Progress before resolving or closing.' });
+    }
+
+    // 24h lock after going IN_PROGRESS
+    if (cur === 'IN_PROGRESS' && isResolution) {
+      const started = contact.inProgressAt ? new Date(contact.inProgressAt).getTime() : 0;
+      const diffMs = Date.now() - started;
+      const hours = diffMs / (1000 * 60 * 60);
+      if (!contact.inProgressAt || hours < 24) {
+        const remaining = Math.max(0, 24 - hours).toFixed(1);
+        return res.status(400).json({ error: `Resolution locked for ${remaining} more hour(s).` });
+      }
+    }
+
+    const data = { status: newStatus };
+    if (newStatus === 'IN_PROGRESS' && cur === 'PENDING' && !contact.inProgressAt) {
+      data.inProgressAt = new Date();
+    }
+
+    const updated = await prisma.contact.update({ where: { id }, data });
+    return res.json(updated);
+  } catch (error) {
+    console.error('Error updating contact status:', error);
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+
+
+// PATCH /api/contact/:id/notes  body: { resolutionNotes: string }
+router.patch('/:id/notes', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resolutionNotes } = req.body;
+    const updated = await prisma.contact.update({
+      where: { id },
+      data: { resolutionNotes: resolutionNotes ?? null }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error saving notes:', error);
+    res.status(500).json({ error: 'Failed to save notes' });
+  }
+});
+
+router.get('/', async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    const where = (() => {
+      if (!status || status === 'ALL') return {};
+      if (status === 'RESOLVED') return { status: { in: ['RESOLVED_EMAIL', 'RESOLVED_PHONE'] } };
+      return { status };
+    })();
+
+    const contacts = await prisma.contact.findMany({ where });
+
+    const priority = { PENDING: 0, IN_PROGRESS: 1, RESOLVED_EMAIL: 2, RESOLVED_PHONE: 3, CLOSED: 4 };
+    contacts.sort((a, b) => {
+      const pa = priority[a.status] ?? 99;
+      const pb = priority[b.status] ?? 99;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    res.json(contacts);
+  } catch (error) {
+    console.error('Error fetching contacts:', error);
+    res.status(500).json({ error: 'Failed to fetch contacts' });
+  }
 });
 
 // Add route to delete a contact
