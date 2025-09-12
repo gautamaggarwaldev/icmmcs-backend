@@ -23,6 +23,9 @@ model registerUser {
   phone            String
   earlyBird        Boolean
   regFee           String
+  paperId              String @unique
+  transactionId        String  @unique
+  uploadPaymentReceipt String
   isPaid           Boolean  @default(false)
   referralCode     String?
   referredById     String?

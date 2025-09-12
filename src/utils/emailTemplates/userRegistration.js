@@ -25,7 +25,9 @@ export const welcomeTemplate = (userData) => `
     <div class="content">
       <h2>Dear ${userData.name},</h2>
       
-      <p>Welcome to ICMMCS 2025! We're thrilled to have you join our prestigious international conference.</p>
+      <p>Welcome to ICMMCS 2025!</p>
+      </br>
+      <p>We're thrilled to have you join our international conference.</p>
       
       <div class="highlight">
         <h3>📋 Your Registration Details</h3>
@@ -33,12 +35,19 @@ export const welcomeTemplate = (userData) => `
         <p><strong>Email:</strong> ${userData.email}</p>
         <p><strong>Phone:</strong> ${userData.phone}</p>
         <p><strong>Registration Date:</strong> ${new Date().toLocaleDateString()}</p>
+        <p><strong>Paper ID:</strong> ${userData.paperId || 'N/A'}</p>
+        <p><strong>Transaction ID:</strong> ${userData.transactionId || 'N/A'}</p>
+        ${
+          userData.uploadPaymentReceipt
+            ? `<p><strong>Payment Receipt:</strong> <a href="${userData.uploadPaymentReceipt}" target="_blank">📎 View Receipt</a></p>`
+            : ''
+        }
       </div>
       
       <div class="info-section">
         <h3>📅 Conference Details</h3>
         <ul>
-          <li><strong>Date:</strong> November 10-11, 2025</li>
+          <li><strong>Date:</strong> November 10, 2025</li>
           <li><strong>Venue:</strong> Majan University College, Muscat, Oman</li>
           <li><strong>Website:</strong> <a href="https://www.icmmcs.org">www.icmmcs.org</a></li>
         </ul>
@@ -47,9 +56,9 @@ export const welcomeTemplate = (userData) => `
       <div class="info-section">
         <h3>🔍 What's Next?</h3>
         <ul>
-          <li>You will receive a confirmation email with your registration ID</li>
-          <li>Conference agenda and program details will be shared soon</li>
-          <li>Accommodation and travel information will be provided</li>
+          <li>You will receive a payment confirmation email shortly</li>
+          <li>Conference agenda and program details will be shared after payment confirmation</li>
+          <li>For accommodation and travel visit our <a href="https://www.icmmcs.org">website</a></li>
           <li>Keep checking our website for updates</li>
         </ul>
       </div>
@@ -59,16 +68,16 @@ export const welcomeTemplate = (userData) => `
         <p>For any questions or assistance, please contact us at:</p>
         <ul>
           <li>Email: info@icmmcs.org</li>
-          <li>Phone: +968 93391308 / +91-9540111207</li>
+          <li>Phone: +91-9540111207 / +91-9540111307</li>
         </ul>
       </div>
       
       <p>We look forward to your participation in advancing the fields of mathematics, management, and computer science!</p>
       
       <p>Best regards,<br>
-      <strong>ICMMCS 2025 Organizing Committee</strong><br>
-      International Conference on Mathematics, Management & Computer Science</p>
-      
+      <strong>Organizing Committee</strong><br>
+      <strong>ICMMCS 2025</strong><br>
+
       <div class="footer">
         <p>This is an automated confirmation email. Please do not reply to this email.</p>
         <p>&copy; 2025 ICMMCS. All rights reserved.</p>
@@ -78,6 +87,64 @@ export const welcomeTemplate = (userData) => `
 </body>
 </html>
 `;
+
+
+export const paymentReceivedTemplate = (user) => `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Payment Received - ICMMCS 2025</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; line-height: 1.5; margin: 0; padding: 0; }
+    .container { max-width: 680px; margin: 0 auto; padding: 24px; }
+    .header { background: linear-gradient(135deg,#019087,#40c4ba); color: #fff; padding: 24px; border-radius: 8px 8px 0 0; text-align:center; }
+    .content { background: #fff; padding: 24px; border: 1px solid #eee; border-top: none; }
+    .info { background: #f7fdfb; padding: 16px; border-left: 4px solid #019087; margin: 16px 0; }
+    .field { margin-bottom: 8px; }
+    .label { font-weight: 700; color: #019087; }
+    .footer { color: #777; font-size: 13px; text-align:center; margin-top: 20px; }
+    a.button { display:inline-block; background:#019087; color:#fff; padding:10px 16px; text-decoration:none; border-radius:6px; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Payment Received — ICMMCS 2025</h1>
+      <p>Thank you for your payment</p>
+    </div>
+
+    <div class="content">
+      <p>Hi <strong>${user.name}</strong>,</p>
+
+      <p>We have successfully received your payment for the ICMMCS 2025 registration. Below are your details:</p>
+
+      <div class="info">
+        <div class="field"><span class="label">Name:</span> ${user.name}</div>
+        <div class="field"><span class="label">Email:</span> ${user.email}</div>
+        <div class="field"><span class="label">Phone:</span> ${user.phone || 'N/A'}</div>
+        <div class="field"><span class="label">Paper ID:</span> ${user.paperId || 'N/A'}</div>
+        <div class="field"><span class="label">Transaction ID:</span> ${user.transactionId || 'N/A'}</div>
+        <div class="field"><span class="label">Registration Type:</span> ${user.registrationType || 'N/A'}</div>
+        <div class="field"><span class="label">Institution:</span> ${user.institutionName || 'N/A'}</div>
+        ${user.uploadPaymentReceipt ? `<div class="field"><span class="label">Receipt:</span> <a href="${user.uploadPaymentReceipt}" target="_blank">View Receipt</a></div>` : ''}
+      </div>
+
+      <p>If you have any questions, please contact <a href="mailto:info@icmmcs.org">info@icmmcs.org</a></p>
+
+      <p>Best regards,<br/><strong>ICMMCS 2025 Organizing Committee</strong></p>
+
+      <div class="footer">
+        <p>This is an automated message. Please do not reply to this email.</p>
+        <p>&copy; 2025 ICMMCS</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+
 
 export const adminNotificationTemplate = (userData) => `
 <!DOCTYPE html>

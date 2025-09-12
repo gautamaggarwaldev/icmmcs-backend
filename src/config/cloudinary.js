@@ -308,4 +308,43 @@ export const reviewerExpressionUpload = multer({
   }
 });
 
+
+const RECEIPT_FOLDER = 'conference-registration-recipts';
+const MAX_RECEIPT_FILESIZE = 5 * 1024 * 1024; // 5MB
+
+const receiptStorage = new CloudinaryStorage({
+  cloudinary,
+  params: (req, file) => ({
+    folder: RECEIPT_FOLDER,
+    resource_type: (file.mimetype && file.mimetype.startsWith('image/')) ? 'image' : 'raw',
+    public_id: makePublicId(file, 'receipt'),
+  })
+});
+
+export const receiptUpload = multer({
+  storage: receiptStorage,
+  limits: { fileSize: MAX_RECEIPT_FILESIZE },
+  fileFilter: (req, file, cb) => {
+    console.log('Receipt upload attempt:', {
+      fieldname: file.fieldname,
+      filename: file.originalname,
+      mimetype: file.mimetype
+    });
+
+    const lower = (file.originalname || '').toLowerCase();
+    const fileExtension = lower.slice(lower.lastIndexOf('.'));
+
+    // allowed: PDF and image (jpg/jpeg/png)
+    const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const allowedMime = ['application/pdf', ...allowedImageTypes];
+
+    if (allowedMime.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
+      return cb(null, true);
+    }
+    return cb(new Error('Receipt must be a PDF or JPG/PNG image (max 5MB).'), false);
+  }
+});
+
+
 export default cloudinary;
