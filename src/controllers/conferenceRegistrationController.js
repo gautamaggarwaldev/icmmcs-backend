@@ -1,8 +1,5 @@
 import { prisma } from "../config/db.js";
-import { sendWithRetry, transporter } from "../config/email.js";
 import { sendUserRegisterEmail } from "../services/emailService.js";
-import { paymentReceivedTemplate } from "../utils/emailTemplates/userRegistration.js";
-
 
 // export const registerUser = async (req, res) => {
 //     const registerUserData = req.body;
@@ -71,9 +68,19 @@ export const registerUser = async (req, res) => {
     referralCode,
     paperId,
     transactionId,
+    conferenceJoiningMode,
   } = registerUserData;
 
   const receiptFile = req.file;
+
+  if (
+    !conferenceJoiningMode ||
+    !["Online", "InPerson"].includes(conferenceJoiningMode)
+  ) {
+    return res
+      .status(400)
+      .json({ error: "conferenceJoiningMode must be 'Online' or 'InPerson'" });
+  }
 
   try {
     // Validate required text fields
@@ -157,10 +164,14 @@ export const registerUser = async (req, res) => {
         paperId,
         transactionId,
         uploadPaymentReceipt: receiptUrl,
+        conferenceJoiningMode,
       },
     });
 
-    await sendUserRegisterEmail({ ...registerUserData, uploadPaymentReceipt: receiptUrl });
+    await sendUserRegisterEmail({
+      ...registerUserData,
+      uploadPaymentReceipt: receiptUrl,
+    });
 
     return res.status(201).json({
       message: "User registered successfully",
@@ -186,7 +197,3 @@ export const getUsers = async (req, res) => {
       .json({ message: "Error retrieving users", error: error.message });
   }
 };
-
-
-
-
