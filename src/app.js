@@ -33,7 +33,8 @@ app.use(cors({
     "http://127.0.0.1:3000",
     "http://icmmcs.org",
     "http://www.icmmcs.org",
-    "https://private.compareunlistedshares.com/icmmcs-backend"
+    "https://private.compareunlistedshares.com/icmmcs-backend",
+    "https://icmmcs-backend.onrender.com/"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
