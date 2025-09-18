@@ -32,15 +32,19 @@ app.use(cors({
     "https://icmmcs.org",
     "http://127.0.0.1:3000",
     "http://icmmcs.org",
-    "http://www.icmmcs.org"
+    "http://www.icmmcs.org",
+    "https://private.compareunlistedshares.com/icmmcs-backend"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
   credentials: true,
   optionsSuccessStatus: 200 // For legacy browser support
 }));
+
+app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 // Connect to database
 connectDB();
