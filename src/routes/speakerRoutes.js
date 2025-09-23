@@ -15,7 +15,9 @@ const router = express.Router();
 
 // Configure multer for multiple file uploads
 const uploadFields = upload.fields([
-  { name: 'paperFile', maxCount: 1 },
+  { name: 'paperFile', maxCount: 1 },         // PDF only
+  { name: 'paperDocxFile', maxCount: 1 },     // DOCX only
+  { name: 'zipFolderFile', maxCount: 1 },     // ZIP only
   { name: 'supplementaryFile', maxCount: 1 },
   { name: 'sourceCodeFile', maxCount: 1 }
 ]);

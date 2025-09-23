@@ -55,6 +55,13 @@ model speaker {
   id              String       @id @default(uuid())
   // paperId   String? @unique   // <— new
   paperId   String  @unique 
+
+  subtitle        String?
+  authorBiography String?      @db.Text   // min 50, max 200 words validated in controller
+  institutionAddress String?
+  affiliation     String?
+  paperDocxUrl    String?      // Only DOCX
+  zipFolderUrl    String?      // Only Zip
   
   // Conference Information
   conferenceTitle String

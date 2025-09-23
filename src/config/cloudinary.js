@@ -31,18 +31,11 @@ const paperStorage = new CloudinaryStorage({
     let resourceType = 'raw';
 
     if (file.fieldname === 'paperFile') {
-      folder = 'conference-papers/papers';
-      resourceType = 'raw';
-    } else if (file.fieldname === 'supplementaryFile') {
-      folder = 'conference-papers/supplementary';
-      resourceType = 'raw';
-    } else if (file.fieldname === 'sourceCodeFile') {
-      folder = 'conference-papers/source-code';
-      resourceType = 'raw';
-    } else if (file.fieldname === 'turnitinReport') {
-      // NEW: Turnitin reports go to a separate folder
-      folder = 'Turnetin_Reports'; // (spelling per your request)
-      resourceType = 'raw';
+      folder = 'conference-papers/pdf';
+    } else if (file.fieldname === 'paperDocxFile') {
+      folder = 'conference-papers/docx';
+    } else if (file.fieldname === 'zipFolderFile') {
+      folder = 'conference-papers/zip';
     }
 
     return {
@@ -54,95 +47,25 @@ const paperStorage = new CloudinaryStorage({
 });
 
 // Multer middleware for paper + related uploads (including Turnitin report)
+
 export const upload = multer({
   storage: paperStorage,
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
-  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    console.log('File upload attempt:', {
-      fieldname: file.fieldname,
-      filename: file.originalname,
-      mimetype: file.mimetype
-    });
-
     const lower = (file.originalname || '').toLowerCase();
-    const fileExtension = lower.slice(lower.lastIndexOf('.'));
+    const ext = lower.slice(lower.lastIndexOf('.'));
 
-    // Different allowed types for different file fields
     if (file.fieldname === 'paperFile') {
-      // PDF, DOCX, LaTeX
-      const allowedTypes = [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/x-tex',
-        'text/x-tex',
-        'application/x-latex',
-        'text/x-latex',
-        'text/plain'  // some systems send .tex as text/plain
-      ];
-      const allowedExts = ['.pdf', '.docx', '.tex', '.latex'];
-
-      if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        return cb(null, true);
-      }
-      return cb(new Error('Paper file must be PDF, DOCX, or LaTeX (.tex, .latex)!'), false);
-
-    } else if (file.fieldname === 'supplementaryFile') {
-      // PDF, DOCX, ZIP, RAR
-      const allowedTypes = [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/octet-stream',
-        'application/zip',
-        'application/x-rar-compressed',
-        'application/x-zip-compressed'
-      ];
-      const allowedExts = ['.pdf', '.docx', '.zip', '.rar'];
-
-      if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        return cb(null, true);
-      }
-      return cb(new Error('Supplementary file must be PDF, DOCX, ZIP, or RAR!'), false);
-
-    } else if (file.fieldname === 'sourceCodeFile') {
-      // ZIP/RAR or common code/text files
-      const allowedTypes = [
-        'application/zip',
-        'application/x-zip-compressed',
-        'application/x-rar-compressed',
-        'text/plain',
-        'text/x-python',
-        'text/x-java-source',
-        'text/x-c++src',
-        'text/x-csrc',
-        'text/javascript',
-        'text/html',
-        'text/css'
-      ];
-      const allowedExts = ['.zip', '.rar', '.py', '.java', '.cpp', '.c', '.js', '.html', '.css'];
-
-      if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        return cb(null, true);
-      }
-      return cb(new Error('Source code must be ZIP, RAR, or a programming file!'), false);
-
-    } else if (file.fieldname === 'turnitinReport') {
-      // NEW: Turnitin report — PDF or DOCX
-      const allowedTypes = [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      ];
-      const allowedExts = ['.pdf', '.docx'];
-
-      if (allowedTypes.includes(file.mimetype) || allowedExts.includes(fileExtension)) {
-        return cb(null, true);
-      }
-      return cb(new Error('Turnitin report must be PDF or DOCX!'), false);
-
-    } else {
-      return cb(new Error('Unknown file field!'), false);
+      if (ext === '.pdf') return cb(null, true);
+      return cb(new Error('Paper file must be PDF only!'), false);
+    } else if (file.fieldname === 'paperDocxFile') {
+      if (ext === '.docx') return cb(null, true);
+      return cb(new Error('Paper in DOCX format only!'), false);
+    } else if (file.fieldname === 'zipFolderFile') {
+      if (ext === '.zip') return cb(null, true);
+      return cb(new Error('Zip folder must be .zip only!'), false);
     }
+    cb(new Error('Unknown file field!'), false);
   }
 });
 
